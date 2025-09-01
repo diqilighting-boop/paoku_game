@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音符跑酷 - 自动版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            color: white;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 500px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        
+        #game-canvas {
+            background: linear-gradient(to bottom, #8e2de2, #4a00e0);
+            width: 100%;
+            height: 100%;
+        }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: #ff9d00;
+            text-shadow: 0 0 10px rgba(255, 157, 0, 0.8);
+        }
+        
+        h2 {
+            font-size: 32px;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            background: linear-gradient(to right, #ff9d00, #ff0080);
+            border: none;
+            padding: 15px 40px;
+            font-size: 20px;
+            border-radius: 50px;
+            color: white;
+            cursor: pointer;
+            margin: 10px;
+            pointer-events: auto;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+        
+        #score-display {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        #high-score-display {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        #controls-info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        #speed-display {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        .powerup-indicator {
+            position: absolute;
+            top: 60px;
+            left: 20px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        .note {
+            position: absolute;
+            color: white;
+            font-size: 24px;
+            animation: float 3s infinite ease-in-out;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <div id="ui-layer">
+            <div id="score-display">分数: 0</div>
+            <div id="high-score-display">最高分: 0</div>
+            <div id="controls-info">控制: 空格键-跳跃</div>
+            <div id="speed-display">速度: 1.0x</div>
+            <div id="powerup-indicator" class="powerup-indicator hidden"></div>
+            
+            <div id="start-screen" class="screen">
+                <h1>音符跑酷</h1>
+                <h2>自动前进版</h2>
+                <button id="start-button">开始游戏</button>
+                <div style="margin-top: 20px; text-align: center;">
+                    <p>收集乐谱增加分数</p>
+                    <p>避开障碍物和陷阱</p>
+                    <p>使用空格键跳跃</p>
+                    <p>游戏速度会越来越快！</p>
+                </div>
+            </div>
+            
+            <div id="game-over-screen" class="screen hidden">
+                <h1>游戏结束</h1>
+                <h2 id="final-score">分数: 0</h2>
+                <button id="restart-button">再来一次</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 游戏常量
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = 12;
+        const BASE_SPEED = 3;
+        const GROUND_HEIGHT = 80;
+        
+        // 游戏变量
+        let canvas, ctx;
+        let player;
+        let obstacles = [];
+        let platforms = [];
+        let collectibles = [];
+        let particles = [];
+        let score = 0;
+        let highScore = 0;
+        let gameSpeed = BASE_SPEED;
+        let gameOver = false;
+        let animationId;
+        let lastObstacleTime = 0;
+        let lastPlatformTime = 0;
+        let lastCollectibleTime = 0;
+        let powerUp = null;
+        let powerUpTime = 0;
+        let speedMultiplier = 1.0;
+        
+        // 玩家类
+        class Player {
+            constructor() {
+                this.width = 30;
+                this.height = 30;
+                this.x = 100;
+                this.y = 300;
+                this.velocityY = 0;
+                this.isJumping = false;
+                this.color = '#ff9d00';
+            }
+            
+            update() {
+                // 应用重力
+                this.velocityY += GRAVITY;
+                this.y += this.velocityY;
+                
+                // 地面碰撞
+                if (this.y > canvas.height - GROUND_HEIGHT - this.height) {
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.velocityY = 0;
+                    this.isJumping = false;
+                }
+            }
+            
+            jump() {
+                if (!this.isJumping) {
+                    this.velocityY = -JUMP_FORCE;
+                    this.isJumping = true;
+                    createParticles(this.x + this.width/2, this.y + this.height, 10, '#ff9d00');
+                }
+            }
+            
+            draw() {
+                // 绘制音符主体
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, this.y + this.height/2, this.width/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 绘制音符尾巴
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(this.x + this.width/2, this.y + this.height/2 + 10);
+                ctx.lineTo(this.x + this.width/2 + 10, this.y + this.height + 15);
+                ctx.stroke();
+            }
+        }
+        
+        // 障碍物类
+        class Obstacle {
+            constructor(type) {
+                this.type = type;
+                
+                // 根据类型设置不同属性
+                if (type === 'high') {
+                    this.width = 40;
+                    this.height = 70;
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.color = '#ff0080';
+                } else if (type === 'low') {
+                    this.width = 60;
+                    this.height = 25;
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.color = '#4361ee';
+                } else if (type === 'flying') {
+                    this.width = 40;
+                    this.height = 40;
+                    this.y = canvas.height - GROUND_HEIGHT - 150;
+                    this.color = '#7209b7';
+                } else if (type === 'moving') {
+                    this.width = 35;
+                    this.height = 35;
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.color = '#38b000';
+                    this.direction = 1;
+                    this.speedX = 2;
+                } else if (type === 'spike') {
+                    this.width = 40;
+                    this.height = 25;
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.color = '#dc2f02';
+                } else if (type === 'double') {
+                    this.width = 30;
+                    this.height = 60;
+                    this.y = canvas.height - GROUND_HEIGHT - this.height;
+                    this.color = '#9d4edd';
+                    this.gap = 200;
+                }
+                
+                this.x = canvas.width;
+            }
+            
+            update() {
+                this.x -= gameSpeed;
+                
+                // 移动障碍物的特殊逻辑
+                if (this.type === 'moving') {
+                    this.y += this.speedX * this.direction;
+                    
+                    if (this.y > canvas.height - GROUND_HEIGHT - this.height || 
+                        this.y < canvas.height - GROUND_HEIGHT - 200) {
+                        this.direction *= -1;
+                    }
+                }
+                
+                // 双障碍物的特殊逻辑
+                if (this.type === 'double') {
+                    if (this.x < canvas.width / 2) {
+                        this.x -= gameSpeed * 0.5; // 减慢第二个障碍物的速度
+                    }
+                }
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                
+                if (this.type === 'flying') {
+                    // 绘制飞行障碍物（八分音符）
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width/2, this.y + this.height/2, this.width/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + this.width/2, this.y + this.height/2 + 10);
+                    ctx.lineTo(this.x + this.width/2 + 10, this.y + this.height + 5);
+                    ctx.lineTo(this.x + this.width/2 - 5, this.y + this.height - 5);
+                    ctx.stroke();
+                } else if (this.type === 'spike') {
+                    // 绘制尖刺
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y + this.height);
+                    ctx.lineTo(this.x + this.width/2, this.y);
+                    ctx.lineTo(this.x + this.width, this.y + this.height);
+                    ctx.closePath();
+                    ctx.fill();
+                } else if (this.type === 'double') {
+                    // 绘制双障碍物
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    ctx.fillRect(this.x + this.width + this.gap, this.y, this.width, this.height);
+                } else {
+                    // 绘制普通障碍物（矩形）
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    
+                    // 添加装饰
+                    ctx.fillStyle = '#ffffff';
+                    for (let i = 0; i < 3; i++) {
+                        ctx.beginPath();
+                        ctx.arc(this.x + this.width/2, this.y + 10 + i*15, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+        
+        // 平台类
+        class Platform {
+            constructor() {
+                this.width = 120 + Math.random() * 100;
+                this.height = 20;
+                this.x = canvas.width;
+                this.y = canvas.height - GROUND_HEIGHT - 100 - Math.random() * 150;
+                this.color = '#4cc9f0';
+            }
+            
+            update() {
+                this.x -= gameSpeed;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                // 添加平台装饰
+                ctx.fillStyle = '#ffffff';
+                for (let i = 0; i < this.width/20; i++) {
+                    ctx.beginPath();
+                    ctx.arc(this.x + 10 + i*20, this.y + this.height/2, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+        
+        // 可收集物品类
+        class Collectible {
+            constructor(type) {
+                this.width = 20;
+                this.height = 20;
+                this.x = canvas.width;
+                this.y = canvas.height - GROUND_HEIGHT - 100 - Math.random() * 200;
+                this.type = type;
+                
+                if (type === 'score') {
+                    this.color = '#ffbe0b';
+                } else if (type === 'powerup') {
+                    this.color = '#ff006e';
+                }
+            }
+            
+            update() {
+                this.x -= gameSpeed;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, this.y + this.height/2, this.width/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 添加装饰（音乐符号）
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '16px Arial';
+                ctx.fillText('♪', this.x + 4, this.y + 16);
+            }
+        }
+        
+        // 粒子类
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.size = 2 + Math.random() * 4;
+                this.speedX = Math.random() * 6 - 3;
+                this.speedY = Math.random() * 6 - 3;
+                this.color = color;
+                this.life = 20 + Math.random() * 30;
+            }
+            
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life--;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = this.life / 50;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+        
+        // 初始化游戏
+        function init() {
+            canvas = document.getElementById('game-canvas');
+            ctx = canvas.getContext('2d');
+            
+            // 设置canvas尺寸
+            canvas.width = 800;
+            canvas.height = 500;
+            
+            // 初始化玩家
+            player = new Player();
+            
+            // 重置游戏状态
+            obstacles = [];
+            platforms = [];
+            collectibles = [];
+            particles = [];
+            score = 0;
+            gameSpeed = BASE_SPEED;
+            speedMultiplier = 1.0;
+            gameOver = false;
+            powerUp = null;
+            
+            // 更新UI
+            document.getElementById('score-display').textContent = `分数: ${score}`;
+            document.getElementById('high-score-display').textContent = `最高分: ${highScore}`;
+            document.getElementById('speed-display').textContent = `速度: ${speedMultiplier.toFixed(1)}x`;
+            
+            // 隐藏开始屏幕
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.add('hidden');
+            
+            // 开始游戏循环
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            gameLoop();
+        }
+        
+        // 创建粒子效果
+        function createParticles(x, y, amount, color) {
+            for (let i = 0; i < amount; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+        
+        // 检测碰撞
+        function checkCollision(obj1, obj2) {
+            if (obj2.type === 'double') {
+                // 处理双障碍物的特殊碰撞检测
+                const obstacle1 = {x: obj2.x, y: obj2.y, width: obj2.width, height: obj2.height};
+                const obstacle2 = {x: obj2.x + obj2.width + obj2.gap, y: obj2.y, width: obj2.width, height: obj2.height};
+                
+                return checkCollision(obj1, obstacle1) || checkCollision(obj1, obstacle2);
+            }
+            
+            return obj1.x < obj2.x + obj2.width &&
+                   obj1.x + obj1.width > obj2.x &&
+                   obj1.y < obj2.y + obj2.height &&
+                   obj1.y + obj1.height > obj2.y;
+        }
+        
+        // 生成障碍物
+        function generateObstacle() {
+            const now = Date.now();
+            if (now - lastObstacleTime > 1200 / speedMultiplier) {
+                const types = ['high', 'low', 'flying', 'moving', 'spike', 'double'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                obstacles.push(new Obstacle(type));
+                lastObstacleTime = now;
+            }
+        }
+        
+        // 生成平台
+        function generatePlatform() {
+            const now = Date.now();
+            if (now - lastPlatformTime > 3000 / speedMultiplier) {
+                platforms.push(new Platform());
+                lastPlatformTime = now;
+            }
+        }
+        
+        // 生成可收集物品
+        function generateCollectible() {
+            const now = Date.now();
+            if (now - lastCollectibleTime > 1500 / speedMultiplier) {
+                const types = ['score', 'powerup'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                collectibles.push(new Collectible(type));
+                lastCollectibleTime = now;
+            }
+        }
+        
+        // 游戏循环
+        function gameLoop() {
+            // 清空画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制背景
+            drawBackground();
+            
+            // 生成游戏元素
+            generateObstacle();
+            generatePlatform();
+            generateCollectible();
+            
+            // 更新和绘制玩家
+            player.update();
+            player.draw();
+            
+            // 更新和绘制平台
+            for (let i = platforms.length - 1; i >= 0; i--) {
+                platforms[i].update();
+                platforms[i].draw();
+                
+                // 检测玩家是否站在平台上
+                if (player.x < platforms[i].x + platforms[i].width &&
+                    player.x + player.width > platforms[i].x &&
+                    player.y + player.height <= platforms[i].y &&
+                    player.y + player.height + player.velocityY >= platforms[i].y) {
+                    player.y = platforms[i].y - player.height;
+                    player.velocityY = 0;
+                    player.isJumping = false;
+                }
+                
+                // 移除屏幕外的平台
+                if (platforms[i].x + platforms[i].width < 0) {
+                    platforms.splice(i, 1);
+                }
+            }
+            
+            // 更新和绘制障碍物
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].update();
+                obstacles[i].draw();
+                
+                // 检测碰撞
+                if (checkCollision(player, obstacles[i])) {
+                    if (powerUp === 'shield') {
+                        // 护盾保护，消除障碍物
+                        createParticles(obstacles[i].x + obstacles[i].width/2, obstacles[i].y + obstacles[i].height/2, 20, '#4cc9f0');
+                        obstacles.splice(i, 1);
+                        score += 5;
+                    } else {
+                        gameOver = true;
+                    }
+                }
+                
+                // 移除屏幕外的障碍物
+                if (obstacles[i].x + (obstacles[i].type === 'double' ? obstacles[i].width * 2 + obstacles[i].gap : obstacles[i].width) < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+            
+            // 更新和绘制可收集物品
+            for (let i = collectibles.length - 1; i >= 0; i--) {
+                collectibles[i].update();
+                collectibles[i].draw();
+                
+                // 检测收集
+                if (checkCollision(player, collectibles[i])) {
+                    if (collectibles[i].type === 'score') {
+                        score += 10;
+                        createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 15, '#ffbe0b');
+                    } else if (collectibles[i].type === 'powerup') {
+                        activatePowerUp();
+                        createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 20, '#ff006e');
+                    }
+                    collectibles.splice(i, 1);
+                }
+                
+                // 移除屏幕外的收集物
+                if (collectibles[i].x + collectibles[i].width < 0) {
+                    collectibles.splice(i, 1);
+                }
+            }
+            
+            // 更新和绘制粒子
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+                
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+            
+            // 绘制地面
+            drawGround();
+            
+            // 更新分数和速度
+            score += 0.1 * speedMultiplier;
+            document.getElementById('score-display').textContent = `分数: ${Math.floor(score)}`;
+            
+            // 每100分增加游戏速度
+            if (Math.floor(score) % 100 === 0 && Math.floor(score) > 0) {
+                speedMultiplier = 1 + Math.floor(score / 100) * 0.2;
+                gameSpeed = BASE_SPEED * speedMultiplier;
+                document.getElementById('speed-display').textContent = `速度: ${speedMultiplier.toFixed(1)}x`;
+            }
+            
+            // 处理能量状态
+            if (powerUp) {
+                const powerUpIndicator = document.getElementById('powerup-indicator');
+                powerUpIndicator.classList.remove('hidden');
+                
+                const timeLeft = Math.max(0, 10 - (Date.now() - powerUpTime) / 1000);
+                powerUpIndicator.textContent = `能量: ${powerUp} (${timeLeft.toFixed(1)}s)`;
+                
+                if (timeLeft <= 0) {
+                    deactivatePowerUp();
+                }
+            }
+            
+            // 游戏结束检查
+            if (gameOver) {
+                endGame();
+                return;
+            }
+            
+            // 继续游戏循环
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        // 绘制背景
+        function drawBackground() {
+            // 渐变背景
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#3a0ca3');
+            gradient.addColorStop(1, '#7209b7');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制音乐符号背景元素
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let i = 0; i < 20; i++) {
+                const x = (canvas.width + (Date.now() / 20) % canvas.width) % (canvas.width + 50) - 50;
+                const y = Math.random() * canvas.height;
+                ctx.font = `${20 + Math.random() * 30}px Arial`;
+                ctx.fillText('♪', x, y);
+            }
+        }
+        
+        // 绘制地面
+        function drawGround() {
+            // 地面
+            ctx.fillStyle = '#480ca8';
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, GROUND_HEIGHT);
+            
+            // 地面装饰线
+            ctx.strokeStyle = '#560bad';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - GROUND_HEIGHT);
+            ctx.lineTo(canvas.width, canvas.height - GROUND_HEIGHT);
+            ctx.stroke();
+            
+            // 地面音符装饰
+            ctx.fillStyle = '#f72585';
+            for (let i = 0; i < canvas.width / 30; i++) {
+                const x = (i * 30 + (Date.now() / 10) % 30) % canvas.width;
+                ctx.beginPath();
+                ctx.arc(x, canvas.height - GROUND_HEIGHT/2, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // 激活能量状态
+        function activatePowerUp() {
+            const powerUps = ['shield', 'magnet', 'doubleJump'];
+            powerUp = powerUps[Math.floor(Math.random() * powerUps.length)];
+            powerUpTime = Date.now();
+            
+            // 应用能量效果
+            if (powerUp === 'shield') {
+                player.color = '#4cc9f0';
+            } else if (powerUp === 'magnet') {
+                player.color = '#ff006e';
+            } else if (powerUp === 'doubleJump') {
+                player.color = '#ffbe0b';
+            }
+        }
+        
+        // 取消能量状态
+        function deactivatePowerUp() {
+            player.color = '#ff9d00';
+            powerUp = null;
+            document.getElementById('powerup-indicator').classList.add('hidden');
+        }
+        
+        // 结束游戏
+        function endGame() {
+            // 更新最高分
+            if (score > highScore) {
+                highScore = score;
+            }
+            
+            // 显示游戏结束屏幕
+            document.getElementById('final-score').textContent = `分数: ${Math.floor(score)}`;
+            document.getElementById('game-over-screen').classList.remove('hidden');
+            
+            // 取消动画帧
+            cancelAnimationFrame(animationId);
+        }
+        
+        // 事件监听
+        document.addEventListener('keydown', (e) => {
+            if ((e.key === ' ' || e.key === 'Spacebar') && !gameOver) {
+                player.jump();
+            }
+        });
+        
+        // 按钮事件
+        document.getElementById('start-button').addEventListener('click', init);
+        document.getElementById('restart-button').addEventListener('click', init);
+        
+        // 初始显示开始屏幕
+        window.onload = () => {
+            document.getElementById('start-screen').classList.remove('hidden');
+        };
+    </script>
+</body>
+</html>
