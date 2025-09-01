@@ -141,6 +141,29 @@
             border-radius: 10px;
         }
         
+        #double-jump-indicator {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        #pause-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px 40px;
+            border-radius: 15px;
+            z-index: 5;
+            display: none;
+        }
+        
         .note {
             position: absolute;
             color: white;
@@ -161,9 +184,11 @@
         <div id="ui-layer">
             <div id="score-display">分数: 0</div>
             <div id="high-score-display">最高分: 0</div>
-            <div id="controls-info">控制: 空格键-跳跃</div>
+            <div id="controls-info">控制: 空格键-跳跃 | P-暂停</div>
             <div id="speed-display">速度: 1.0x</div>
             <div id="powerup-indicator" class="powerup-indicator hidden"></div>
+            <div id="double-jump-indicator">二段跳: 可用</div>
+            <div id="pause-indicator">已暂停</div>
             
             <div id="start-screen" class="screen">
                 <h1>音符跑酷</h1>
@@ -172,7 +197,8 @@
                 <div style="margin-top: 20px; text-align: center;">
                     <p>收集乐谱增加分数</p>
                     <p>避开障碍物和陷阱</p>
-                    <p>使用空格键跳跃</p>
+                    <p>使用空格键跳跃（可二段跳）</p>
+                    <p>按P键暂停游戏</p>
                     <p>游戏速度会越来越快！</p>
                 </div>
             </div>
@@ -203,6 +229,7 @@
         let highScore = 0;
         let gameSpeed = BASE_SPEED;
         let gameOver = false;
+        let gamePaused = false;
         let animationId;
         let lastObstacleTime = 0;
         let lastPlatformTime = 0;
@@ -210,6 +237,8 @@
         let powerUp = null;
         let powerUpTime = 0;
         let speedMultiplier = 1.0;
+        let canDoubleJump = true;
+        let doubleJumpCooldown = false;
         
         // 玩家类
         class Player {
@@ -233,14 +262,31 @@
                     this.y = canvas.height - GROUND_HEIGHT - this.height;
                     this.velocityY = 0;
                     this.isJumping = false;
+                    canDoubleJump = true; // 重置二段跳
+                    updateDoubleJumpIndicator();
                 }
             }
             
             jump() {
                 if (!this.isJumping) {
+                    // 一段跳
                     this.velocityY = -JUMP_FORCE;
                     this.isJumping = true;
+                    canDoubleJump = true; // 允许二段跳
+                    updateDoubleJumpIndicator();
                     createParticles(this.x + this.width/2, this.y + this.height, 10, '#ff9d00');
+                } else if (canDoubleJump && !doubleJumpCooldown) {
+                    // 二段跳
+                    this.velocityY = -JUMP_FORCE * 0.9; // 二段跳力量稍小
+                    canDoubleJump = false;
+                    doubleJumpCooldown = true;
+                    updateDoubleJumpIndicator();
+                    createParticles(this.x + this.width/2, this.y + this.height, 15, '#4cc9f0');
+                    
+                    // 二段跳冷却时间
+                    setTimeout(() => {
+                        doubleJumpCooldown = false;
+                    }, 300);
                 }
             }
             
@@ -258,6 +304,15 @@
                 ctx.moveTo(this.x + this.width/2, this.y + this.height/2 + 10);
                 ctx.lineTo(this.x + this.width/2 + 10, this.y + this.height + 15);
                 ctx.stroke();
+                
+                // 如果可以使用二段跳，绘制特效
+                if (canDoubleJump && this.isJumping) {
+                    ctx.strokeStyle = '#4cc9f0';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width/2, this.y + this.height/2, this.width/2 + 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
             }
         }
         
@@ -458,6 +513,18 @@
             }
         }
         
+        // 更新二段跳指示器
+        function updateDoubleJumpIndicator() {
+            const indicator = document.getElementById('double-jump-indicator');
+            if (canDoubleJump) {
+                indicator.textContent = "二段跳: 可用";
+                indicator.style.color = "#4cc9f0";
+            } else {
+                indicator.textContent = "二段跳: 不可用";
+                indicator.style.color = "#ff006e";
+            }
+        }
+        
         // 初始化游戏
         function init() {
             canvas = document.getElementById('game-canvas');
@@ -479,12 +546,17 @@
             gameSpeed = BASE_SPEED;
             speedMultiplier = 1.0;
             gameOver = false;
+            gamePaused = false;
             powerUp = null;
+            canDoubleJump = true;
+            doubleJumpCooldown = false;
             
             // 更新UI
             document.getElementById('score-display').textContent = `分数: ${score}`;
             document.getElementById('high-score-display').textContent = `最高分: ${highScore}`;
             document.getElementById('speed-display').textContent = `速度: ${speedMultiplier.toFixed(1)}x`;
+            updateDoubleJumpIndicator();
+            document.getElementById('pause-indicator').style.display = 'none';
             
             // 隐藏开始屏幕
             document.getElementById('start-screen').classList.add('hidden');
@@ -559,124 +631,132 @@
             // 绘制背景
             drawBackground();
             
-            // 生成游戏元素
-            generateObstacle();
-            generatePlatform();
-            generateCollectible();
+            // 如果游戏暂停，只绘制不更新
+            if (!gamePaused) {
+                // 生成游戏元素
+                generateObstacle();
+                generatePlatform();
+                generateCollectible();
+                
+                // 更新和绘制玩家
+                player.update();
+                
+                // 更新和绘制平台
+                for (let i = platforms.length - 1; i >= 0; i--) {
+                    platforms[i].update();
+                    
+                    // 检测玩家是否站在平台上
+                    if (player.x < platforms[i].x + platforms[i].width &&
+                        player.x + player.width > platforms[i].x &&
+                        player.y + player.height <= platforms[i].y &&
+                        player.y + player.height + player.velocityY >= platforms[i].y) {
+                        player.y = platforms[i].y - player.height;
+                        player.velocityY = 0;
+                        player.isJumping = false;
+                        canDoubleJump = true; // 重置二段跳
+                        updateDoubleJumpIndicator();
+                    }
+                    
+                    // 移除屏幕外的平台
+                    if (platforms[i].x + platforms[i].width < 0) {
+                        platforms.splice(i, 1);
+                    }
+                }
+                
+                // 更新和绘制障碍物
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    obstacles[i].update();
+                    
+                    // 检测碰撞
+                    if (checkCollision(player, obstacles[i])) {
+                        if (powerUp === 'shield') {
+                            // 护盾保护，消除障碍物
+                            createParticles(obstacles[i].x + obstacles[i].width/2, obstacles[i].y + obstacles[i].height/2, 20, '#4cc9f0');
+                            obstacles.splice(i, 1);
+                            score += 5;
+                        } else {
+                            gameOver = true;
+                        }
+                    }
+                    
+                    // 移除屏幕外的障碍物
+                    if (obstacles[i].x + (obstacles[i].type === 'double' ? obstacles[i].width * 2 + obstacles[i].gap : obstacles[i].width) < 0) {
+                        obstacles.splice(i, 1);
+                    }
+                }
+                
+                // 更新和绘制可收集物品
+                for (let i = collectibles.length - 1; i >= 0; i--) {
+                    collectibles[i].update();
+                    
+                    // 检测收集
+                    if (checkCollision(player, collectibles[i])) {
+                        if (collectibles[i].type === 'score') {
+                            score += 10;
+                            createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 15, '#ffbe0b');
+                        } else if (collectibles[i].type === 'powerup') {
+                            activatePowerUp();
+                            createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 20, '#ff006e');
+                        }
+                        collectibles.splice(i, 1);
+                    }
+                    
+                    // 移除屏幕外的收集物
+                    if (collectibles[i].x + collectibles[i].width < 0) {
+                        collectibles.splice(i, 1);
+                    }
+                }
+                
+                // 更新和绘制粒子
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    particles[i].update();
+                    
+                    if (particles[i].life <= 0) {
+                        particles.splice(i, 1);
+                    }
+                }
+                
+                // 更新分数和速度
+                score += 0.1 * speedMultiplier;
+                document.getElementById('score-display').textContent = `分数: ${Math.floor(score)}`;
+                
+                // 每100分增加游戏速度
+                if (Math.floor(score) % 100 === 0 && Math.floor(score) > 0) {
+                    speedMultiplier = 1 + Math.floor(score / 100) * 0.2;
+                    gameSpeed = BASE_SPEED * speedMultiplier;
+                    document.getElementById('speed-display').textContent = `速度: ${speedMultiplier.toFixed(1)}x`;
+                }
+                
+                // 处理能量状态
+                if (powerUp) {
+                    const powerUpIndicator = document.getElementById('powerup-indicator');
+                    powerUpIndicator.classList.remove('hidden');
+                    
+                    const timeLeft = Math.max(0, 10 - (Date.now() - powerUpTime) / 1000);
+                    powerUpIndicator.textContent = `能量: ${powerUp} (${timeLeft.toFixed(1)}s)`;
+                    
+                    if (timeLeft <= 0) {
+                        deactivatePowerUp();
+                    }
+                }
+                
+                // 游戏结束检查
+                if (gameOver) {
+                    endGame();
+                    return;
+                }
+            }
             
-            // 更新和绘制玩家
-            player.update();
+            // 绘制所有元素
             player.draw();
             
-            // 更新和绘制平台
-            for (let i = platforms.length - 1; i >= 0; i--) {
-                platforms[i].update();
-                platforms[i].draw();
-                
-                // 检测玩家是否站在平台上
-                if (player.x < platforms[i].x + platforms[i].width &&
-                    player.x + player.width > platforms[i].x &&
-                    player.y + player.height <= platforms[i].y &&
-                    player.y + player.height + player.velocityY >= platforms[i].y) {
-                    player.y = platforms[i].y - player.height;
-                    player.velocityY = 0;
-                    player.isJumping = false;
-                }
-                
-                // 移除屏幕外的平台
-                if (platforms[i].x + platforms[i].width < 0) {
-                    platforms.splice(i, 1);
-                }
-            }
-            
-            // 更新和绘制障碍物
-            for (let i = obstacles.length - 1; i >= 0; i--) {
-                obstacles[i].update();
-                obstacles[i].draw();
-                
-                // 检测碰撞
-                if (checkCollision(player, obstacles[i])) {
-                    if (powerUp === 'shield') {
-                        // 护盾保护，消除障碍物
-                        createParticles(obstacles[i].x + obstacles[i].width/2, obstacles[i].y + obstacles[i].height/2, 20, '#4cc9f0');
-                        obstacles.splice(i, 1);
-                        score += 5;
-                    } else {
-                        gameOver = true;
-                    }
-                }
-                
-                // 移除屏幕外的障碍物
-                if (obstacles[i].x + (obstacles[i].type === 'double' ? obstacles[i].width * 2 + obstacles[i].gap : obstacles[i].width) < 0) {
-                    obstacles.splice(i, 1);
-                }
-            }
-            
-            // 更新和绘制可收集物品
-            for (let i = collectibles.length - 1; i >= 0; i--) {
-                collectibles[i].update();
-                collectibles[i].draw();
-                
-                // 检测收集
-                if (checkCollision(player, collectibles[i])) {
-                    if (collectibles[i].type === 'score') {
-                        score += 10;
-                        createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 15, '#ffbe0b');
-                    } else if (collectibles[i].type === 'powerup') {
-                        activatePowerUp();
-                        createParticles(collectibles[i].x + collectibles[i].width/2, collectibles[i].y + collectibles[i].height/2, 20, '#ff006e');
-                    }
-                    collectibles.splice(i, 1);
-                }
-                
-                // 移除屏幕外的收集物
-                if (collectibles[i].x + collectibles[i].width < 0) {
-                    collectibles.splice(i, 1);
-                }
-            }
-            
-            // 更新和绘制粒子
-            for (let i = particles.length - 1; i >= 0; i--) {
-                particles[i].update();
-                particles[i].draw();
-                
-                if (particles[i].life <= 0) {
-                    particles.splice(i, 1);
-                }
-            }
+            platforms.forEach(platform => platform.draw());
+            obstacles.forEach(obstacle => obstacle.draw());
+            collectibles.forEach(collectible => collectible.draw());
+            particles.forEach(particle => particle.draw());
             
             // 绘制地面
             drawGround();
-            
-            // 更新分数和速度
-            score += 0.1 * speedMultiplier;
-            document.getElementById('score-display').textContent = `分数: ${Math.floor(score)}`;
-            
-            // 每100分增加游戏速度
-            if (Math.floor(score) % 100 === 0 && Math.floor(score) > 0) {
-                speedMultiplier = 1 + Math.floor(score / 100) * 0.2;
-                gameSpeed = BASE_SPEED * speedMultiplier;
-                document.getElementById('speed-display').textContent = `速度: ${speedMultiplier.toFixed(1)}x`;
-            }
-            
-            // 处理能量状态
-            if (powerUp) {
-                const powerUpIndicator = document.getElementById('powerup-indicator');
-                powerUpIndicator.classList.remove('hidden');
-                
-                const timeLeft = Math.max(0, 10 - (Date.now() - powerUpTime) / 1000);
-                powerUpIndicator.textContent = `能量: ${powerUp} (${timeLeft.toFixed(1)}s)`;
-                
-                if (timeLeft <= 0) {
-                    deactivatePowerUp();
-                }
-            }
-            
-            // 游戏结束检查
-            if (gameOver) {
-                endGame();
-                return;
-            }
             
             // 继续游戏循环
             animationId = requestAnimationFrame(gameLoop);
@@ -748,6 +828,22 @@
             document.getElementById('powerup-indicator').classList.add('hidden');
         }
         
+        // 暂停/继续游戏
+        function togglePause() {
+            if (gameOver) return;
+            
+            gamePaused = !gamePaused;
+            const pauseIndicator = document.getElementById('pause-indicator');
+            
+            if (gamePaused) {
+                pauseIndicator.style.display = 'block';
+            } else {
+                pauseIndicator.style.display = 'none';
+                // 如果取消暂停，继续游戏循环
+                gameLoop();
+            }
+        }
+        
         // 结束游戏
         function endGame() {
             // 更新最高分
@@ -765,8 +861,14 @@
         
         // 事件监听
         document.addEventListener('keydown', (e) => {
-            if ((e.key === ' ' || e.key === 'Spacebar') && !gameOver) {
-                player.jump();
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                if (!gameOver && !gamePaused) {
+                    player.jump();
+                }
+            }
+            
+            if (e.key === 'p' || e.key === 'P') {
+                togglePause();
             }
         });
         
